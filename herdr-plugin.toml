@@ -1,0 +1,32 @@
+id = "local.auto-name"
+name = "Auto Name"
+version = "0.1.0"
+min_herdr_version = "0.9.3"
+description = "Name local Pi agents from their persisted task context"
+platforms = ["macos"]
+
+[[actions]]
+id = "rename"
+title = "Rename from current task"
+contexts = ["pane"]
+command = ["node", "src/main.mjs", "rename"]
+
+[[actions]]
+id = "pause"
+title = "Pause automatic naming"
+contexts = ["pane"]
+command = ["node", "src/main.mjs", "pause"]
+
+[[actions]]
+id = "resume"
+title = "Resume automatic naming"
+contexts = ["pane"]
+command = ["node", "src/main.mjs", "resume"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["node", "src/main.mjs", "check"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["node", "src/main.mjs", "check"]

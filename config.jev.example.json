@@ -1,0 +1,8 @@
+{
+  "provider": "deepseek",
+  "model": "deepseek-flash",
+  "classifier": {
+    "provider": "typesafe",
+    "model": "jev-latest"
+  }
+}
