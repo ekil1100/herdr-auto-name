@@ -24,7 +24,7 @@ A model identifies the task, so actual names may differ from these examples. If 
 
 | Component | Requirement |
 | --- | --- |
-| Operating system | macOS |
+| Plugin platform declaration | Currently macOS only; see [Platform compatibility](#platform-compatibility) |
 | Node.js | 22 or later; `node` must be in the Herdr plugin process's `PATH` |
 | Herdr | 0.9.3 or later; verified with 0.9.3 |
 | Agent | Local Pi; session parsing uses the v3 JSONL format from Pi 1.0.0 |
@@ -32,13 +32,19 @@ A model identifies the task, so actual names may differ from these examples. If 
 
 Herdr must report the path to Pi's local session file. The plugin reads that file without modifying it and uses a separate Herdr plugin entry point. No changes to Herdr's managed Pi integration are required.
 
+### Platform compatibility
+
+Herdr's plugin system supports Linux, macOS, and Windows. This project's manifest currently declares only `platforms = ["macos"]`; that is a plugin-specific restriction, not a macOS requirement imposed by Herdr.
+
+The plugin uses Node.js and calls Herdr through `HERDR_BIN_PATH`, avoiding OS-specific socket transport. However, its session-path validation currently requires a leading `/`, which rejects Windows drive-letter and backslash UNC paths. Linux and Windows compatibility has not been verified. Cross-platform support requires updating the manifest, correcting path validation where needed, and testing on the target systems.
+
 ## Quick start
 
 > **Privacy notice:** The plugin sends necessary task text and summaries to the configured model service. Before enabling it, confirm that the relevant sessions may use these services. When Jev is enabled, task text is also sent to TypeSafe.
 
 ### 1. Install dependencies and link the plugin
 
-After downloading the project, run these commands from the project root:
+After downloading the project, run these commands from the project root in Bash or Zsh:
 
 ```bash
 npm ci
@@ -207,7 +213,7 @@ Event or manual action → Enqueue request → Read session → Identify task
 ### Triggers and session scope
 
 - Listens for `pane.agent_detected` and `pane.agent_status_changed`. Messages added during work without a status change wait for the next event or manual action.
-- Supports local absolute paths and v3 JSONL session files. Remote sessions and sessions reported only by ID are currently unsupported.
+- Supports local absolute paths beginning with `/` and v3 JSONL session files. Windows drive-letter and backslash UNC paths, remote sessions, and sessions reported only by ID are currently unsupported.
 - Follows `parentId` to read the last persisted branch. If Pi switches branches only in memory, the plugin observes the change after a subsequent write.
 - Excludes assistant, tool, and `custom_message` entries. Messages written by extensions through `sendUserMessage()` have the same format as ordinary user messages, so their source cannot be reliably distinguished.
 - Reads only complete JSONL lines. Image-only input keeps the current name; mixed input uses only the text.
