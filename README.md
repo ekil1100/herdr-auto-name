@@ -25,7 +25,7 @@ A model identifies the task, so actual names may differ from these examples. If 
 | Component | Requirement |
 | --- | --- |
 | Plugin platform declaration | macOS and Linux; see [Platform compatibility](#platform-compatibility) |
-| Node.js | 22 or later; `node` must be in the Herdr plugin process's `PATH` |
+| Node.js | 22.21+ within Node 22, or 24.5+; `node` must be in the Herdr plugin process's `PATH` |
 | Herdr | 0.9.3 or later; verified with 0.9.3 |
 | Agent | Local Pi; session parsing uses the v3 JSONL format from Pi 1.0.0 |
 | Model service | DeepSeek or OpenAI; Jev classification is optional |
@@ -146,7 +146,9 @@ Default URLs:
 | `openai` | `https://api.openai.com/v1` |
 | `typesafe` | `https://api.typesafe.ai/v1` |
 
-To use a proxy, add `baseUrl` to the top-level configuration or the `classifier` object. The code appends `/chat/completions` or `/systemone`, respectively. Keys are still read from the corresponding provider's environment variable.
+For an HTTP forward proxy, set `HTTP_PROXY`, `HTTPS_PROXY`, and optionally `NO_PROXY` in the environment Herdr uses to start the plugin. All plugin entry points enable Node's `--use-env-proxy`, so both naming and Jev requests use these settings. With no proxy configured, requests connect directly. Use `NO_PROXY` to bypass the proxy for selected hosts.
+
+For an API gateway or reverse proxy, add `baseUrl` to the top-level configuration or the `classifier` object. The code appends `/chat/completions` or `/systemone`, respectively. Keys are still read from the corresponding provider's environment variable.
 
 Remote URLs require HTTPS. HTTP is supported only for `localhost`, `127.0.0.1`, and `::1`.
 

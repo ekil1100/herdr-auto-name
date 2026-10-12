@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": { "node": "^22.21.0 || >=24.5.0" },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "check": "node --check src/main.mjs && node --check src/engine.mjs && node --check src/pi-session.mjs && node --check src/naming.mjs && node --check src/state.mjs && node --check src/herdr.mjs"
