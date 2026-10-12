@@ -3,7 +3,7 @@ name = "Auto Name"
 version = "0.1.0"
 min_herdr_version = "0.9.3"
 description = "Name local Pi agents from their persisted task context"
-platforms = ["macos"]
+platforms = ["macos", "linux"]
 
 [[actions]]
 id = "rename"

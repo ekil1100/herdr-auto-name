@@ -24,7 +24,7 @@ A model identifies the task, so actual names may differ from these examples. If 
 
 | Component | Requirement |
 | --- | --- |
-| Plugin platform declaration | Currently macOS only; see [Platform compatibility](#platform-compatibility) |
+| Plugin platform declaration | macOS and Linux; see [Platform compatibility](#platform-compatibility) |
 | Node.js | 22 or later; `node` must be in the Herdr plugin process's `PATH` |
 | Herdr | 0.9.3 or later; verified with 0.9.3 |
 | Agent | Local Pi; session parsing uses the v3 JSONL format from Pi 1.0.0 |
@@ -34,9 +34,9 @@ Herdr must report the path to Pi's local session file. The plugin reads that fil
 
 ### Platform compatibility
 
-Herdr's plugin system supports Linux, macOS, and Windows. This project's manifest currently declares only `platforms = ["macos"]`; that is a plugin-specific restriction, not a macOS requirement imposed by Herdr.
+This project's manifest enables macOS and Linux. The plugin uses Node.js and calls Herdr through `HERDR_BIN_PATH`, avoiding OS-specific socket transport. Automated tests use mock CLI and HTTP services; live Herdr integration must be verified on the target system.
 
-The plugin uses Node.js and calls Herdr through `HERDR_BIN_PATH`, avoiding OS-specific socket transport. However, its session-path validation currently requires a leading `/`, which rejects Windows drive-letter and backslash UNC paths. Linux and Windows compatibility has not been verified. Cross-platform support requires updating the manifest, correcting path validation where needed, and testing on the target systems.
+Windows is not enabled: session-path validation currently requires a leading `/`, which rejects Windows drive-letter and backslash UNC paths.
 
 ## Quick start
 
