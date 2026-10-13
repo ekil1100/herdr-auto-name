@@ -1,67 +1,54 @@
 # Herdr Auto Name
 
-Automatically give Pi agents in [Herdr](https://herdr.dev) short English names based on their current task. Names stay the same for follow-up work and change when the main goal changes.
+Automatically name local Pi agents in [Herdr](https://herdr.dev) from their current task. Names are short and English: follow-up work keeps the name, while a new goal gets a new name.
 
-| User input | Expected behavior |
+| User input | Example result |
 | --- | --- |
-| “Fix the login failure” | Set the name to `fix-login` |
+| “Fix the login failure” | `fix-login` |
 | “Continue,” “add tests,” or “commit these changes” | Keep the name |
-| “Next, handle payment timeouts” | Change the name to `fix-payment-timeout` |
+| “Next, handle payment timeouts” | `fix-payment-timeout` |
 | Insufficient context or image-only input | Keep the name |
 
-A model identifies the task, so actual names may differ from these examples. If it makes a mistake, you can rename the agent manually or pause automatic naming.
+Actual names depend on the model. You can request a rename, pause automatic naming, or rename an agent yourself. An external manual rename pauses automatic naming for that session.
 
-## Features
+The plugin supports DeepSeek and OpenAI for task identification and naming, with optional TypeSafe Jev classification to skip naming calls for unchanged tasks. It reads Pi session files without modifying them and requires no changes to Herdr's managed Pi integration.
 
-- Listen for Herdr agent detection and status changes to check for new tasks.
-- Use DeepSeek or OpenAI to identify tasks and generate names.
-- Optionally classify tasks with TypeSafe Jev first, calling the naming model only when a new name is needed.
-- Save progress, skip processed messages, and retry failed operations.
-- Detect external manual renames and pause automatic naming for that session.
-- Provide rename, pause, and resume actions that can be bound to keyboard shortcuts.
+[Installation](#installation) · [Configuration](#configuration) · [Usage](#usage) · [Troubleshooting](#troubleshooting) · [Limitations](#limitations)
 
-## Requirements
+## Installation
+
+### Requirements
 
 | Component | Requirement |
 | --- | --- |
-| Plugin platform declaration | macOS and Linux; see [Platform compatibility](#platform-compatibility) |
-| Node.js | 22.21+ within Node 22, or 24.5+; `node` must be in the Herdr plugin process's `PATH` |
+| Platform | macOS or Linux; live integration must be verified on your system |
+| Node.js | 22.21+ within Node 22, or 24.5+; `node` must be in the plugin process's `PATH` |
 | Herdr | 0.9.3 or later; verified with 0.9.3 |
-| Agent | Local Pi; session parsing uses the v3 JSONL format from Pi 1.0.0 |
-| Model service | DeepSeek or OpenAI; Jev classification is optional |
+| Agent | Local Pi with a session file path reported by Herdr; parsing uses the v3 JSONL format from Pi 1.0.0 |
+| Model service | DeepSeek or OpenAI; TypeSafe is optional |
 
-Herdr must report the path to Pi's local session file. The plugin reads that file without modifying it and uses a separate Herdr plugin entry point. No changes to Herdr's managed Pi integration are required.
+> **Privacy:** Task text and summaries are sent to the configured model service, and also to TypeSafe when Jev is enabled. Confirm that your sessions may use these services before enabling the plugin. See [Privacy and stored data](#privacy-and-stored-data).
 
-### Platform compatibility
+### 1. Link the plugin
 
-This project's manifest enables macOS and Linux. The plugin uses Node.js and calls Herdr through `HERDR_BIN_PATH`, avoiding OS-specific socket transport. Automated tests use mock CLI and HTTP services; live Herdr integration must be verified on the target system.
-
-Windows is not enabled: session-path validation currently requires a leading `/`, which rejects Windows drive-letter and backslash UNC paths.
-
-## Quick start
-
-> **Privacy notice:** The plugin sends necessary task text and summaries to the configured model service. Before enabling it, confirm that the relevant sessions may use these services. When Jev is enabled, task text is also sent to TypeSafe.
-
-### 1. Install dependencies and link the plugin
-
-After downloading the project, run these commands from the project root in Bash or Zsh:
+From the project root, run in Bash or Zsh:
 
 ```bash
 npm ci
 herdr plugin link "$PWD" --disabled
 ```
 
-Link the plugin in a disabled state, then enable it after configuration. The plugin ID is `local.auto-name`.
+The plugin ID is `local.auto-name`. Keep it disabled until configuration is complete.
 
 ### 2. Create the configuration
 
-Find the configuration directory:
+Find the plugin's configuration directory:
 
 ```bash
 herdr plugin config-dir local.auto-name
 ```
 
-Copy [`config.example.json`](config.example.json) to that directory as `config.json`:
+Copy [`config.example.json`](config.example.json) into that directory as `config.json`:
 
 ```json
 {
@@ -70,46 +57,79 @@ Copy [`config.example.json`](config.example.json) to that directory as `config.j
 }
 ```
 
-This configuration uses DeepSeek for task identification and naming. The provider determines the default service URL and API key environment variable.
+This uses DeepSeek for both task identification and naming. See [Configuration](#configuration) for OpenAI, Jev, and custom service URLs.
 
-### 3. Set API keys
+### 3. Set the API key
 
-| Provider | API key environment variable | Purpose |
-| --- | --- | --- |
-| `deepseek` | `DEEPSEEK_API_KEY` | Task identification and naming |
-| `openai` | `OPENAI_API_KEY` | Task identification and naming |
-| `typesafe` | `TYPESAFE_API_KEY` | Optional Jev classification |
+Make `DEEPSEEK_API_KEY` available in **the environment Herdr uses to start the plugin**. For OpenAI, use `OPENAI_API_KEY` instead.
 
-Keys must be available in **the environment Herdr uses to start the plugin**. Set them through your Herdr launch method or environment management tool.
-
-Running `export` in an existing pane usually affects only that pane's child processes. The running Herdr service keeps its original environment. Check the plugin logs to verify access. Avoid interrupting an active Herdr service just to update environment variables.
+Set keys through your Herdr launch method or environment management tool. An `export` in an existing pane usually affects only that pane's child processes; the running Herdr service keeps its original environment. Avoid interrupting an active service just to update variables.
 
 The plugin reads keys from environment variables, not Pi's login store. Keep keys out of project files and version control.
 
 ### 4. Enable and verify
 
 ```bash
-herdr plugin enable local.auto-name
-herdr plugin list --plugin local.auto-name --json
+herdr plugin enable local.auto-name > /dev/null
 ```
 
-Confirm that the output includes `"enabled": true`. Subsequent agent detection and status change events trigger checks; enabling the plugin does not immediately check the current task.
+Paste this prompt into a local Pi agent running in Herdr. The agent can inspect the CLI's JSON output and summarize the result for you:
 
-Run a manual rename in the target Pi pane, then inspect the logs and agent name:
+```text
+Verify that the Herdr Auto Name plugin (local.auto-name) works for this Pi agent.
 
-```bash
-herdr plugin action invoke local.auto-name.rename
-herdr plugin log list --plugin local.auto-name --limit 20
-herdr agent list
+1. Run `herdr plugin list --plugin local.auto-name --json` and confirm that the
+   plugin is enabled.
+2. Identify this agent and its pane from the current Herdr context. Use
+   `herdr agent list` to record its current name and session. If you cannot
+   identify the target unambiguously, stop and ask me to select it.
+3. Invoke `herdr plugin action invoke local.auto-name.rename` for this pane.
+4. Inspect `herdr plugin log list --plugin local.auto-name --limit 20` and
+   `herdr agent list`. Allow time for processing and recheck as needed, with
+   a bounded wait. Correlate the result with this target and request; an
+   accepted action alone does not prove that naming succeeded.
+5. Report PASS, FAIL, or INCONCLUSIVE in plain language, with the before/after
+   name and relevant evidence. A name that stays the same needs evidence of
+   successful processing. If verification fails or remains pending, explain
+   the reason and the next step. Do not dump raw JSON.
+
+Do not reveal API keys or full session text, change configuration, restart
+Herdr, or rename other agents. This check may rename the current agent to
+match this verification task; it verifies manual naming, not automatic events.
 ```
 
-Once enabled, the plugin processes eligible local Pi agents in that Herdr service. Verify this scope rather than checking only the current pane.
+Enabling alone does not check the current task. Automatic checks run on subsequent agent detection and status changes. The plugin processes eligible local Pi agents throughout that Herdr service, not just the current pane. See [Troubleshooting](#troubleshooting) for common errors.
 
 ## Configuration
 
-### Optional: Jev classification with a separate naming model
+Settings live in `config.json` in the directory returned by `herdr plugin config-dir local.auto-name`.
 
-Use [`config.jev.example.json`](config.jev.example.json):
+### Naming service
+
+| Setting | Supported values or behavior |
+| --- | --- |
+| `provider` | `deepseek` or `openai` |
+| `model` | A model ID offered by the selected service |
+| `baseUrl` | Optional service URL override; defaults below |
+| `classifier` | Optional Jev configuration; see below |
+
+The naming model must support Chat Completions, `response_format: {"type":"json_object"}`, and `max_tokens`. DeepSeek calls disable thinking mode.
+
+| Provider | Default URL | API key variable |
+| --- | --- | --- |
+| `deepseek` | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
+| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| `typesafe` (classifier only) | `https://api.typesafe.ai/v1` | `TYPESAFE_API_KEY` |
+
+For an HTTP forward proxy, set `HTTP_PROXY`, `HTTPS_PROXY`, and optionally `NO_PROXY` in the environment Herdr uses to start the plugin. All plugin entry points enable Node's `--use-env-proxy`, so both naming and Jev requests use these settings. With no proxy configured, requests connect directly. Use `NO_PROXY` to bypass the proxy for selected hosts.
+
+For an API gateway or reverse proxy, set `baseUrl` at the top level or inside `classifier`. The plugin appends `/chat/completions` for naming and `/systemone` for Jev. Keys still come from the selected provider's environment variable.
+
+Remote URLs require HTTPS. HTTP is supported only for `localhost`, `127.0.0.1`, and `::1`.
+
+### Optional Jev classification
+
+Use [`config.jev.example.json`](config.jev.example.json) to classify tasks before calling the naming model:
 
 ```json
 {
@@ -122,49 +142,31 @@ Use [`config.jev.example.json`](config.jev.example.json):
 }
 ```
 
-This configuration requires both `DEEPSEEK_API_KEY` and `TYPESAFE_API_KEY`.
+This example requires both `DEEPSEEK_API_KEY` and `TYPESAFE_API_KEY`. The supported classifier is `typesafe` / `jev-latest`.
 
 | Condition | Behavior |
 | --- | --- |
-| `classifier` is omitted | The naming model identifies the task and generates a name in one call |
-| Jev identifies the same task or insufficient context | Keep the name and existing summary; skip the naming model call |
-| Jev identifies a new task | The naming model generates a name and summary |
+| `classifier` omitted | One naming-model call identifies the task and generates a name |
+| Jev reports the same task or insufficient context | Keep the name and summary; skip the naming-model call |
+| Jev reports a new task | Call the naming model for a name and summary |
 | Manual rename or resume | Call the naming model directly to allow classification mistakes to be corrected |
-| A configured Jev call fails | Keep the name and retry using the selected service |
+| Jev call fails | Keep the name and retry using the selected service |
 
-Jev uses TypeSafe's `/systemone` endpoint. The supported classifier is currently the `jev-latest` model from the `typesafe` provider.
+## Usage
 
-### Naming models and custom URLs
-
-The top-level `provider` supports `deepseek` and `openai`. Set `model` to a model ID offered by that service. The naming model must support Chat Completions, `response_format: {"type":"json_object"}`, and `max_tokens`. DeepSeek calls disable thinking mode.
-
-Default URLs:
-
-| Provider | URL |
-| --- | --- |
-| `deepseek` | `https://api.deepseek.com` |
-| `openai` | `https://api.openai.com/v1` |
-| `typesafe` | `https://api.typesafe.ai/v1` |
-
-For an HTTP forward proxy, set `HTTP_PROXY`, `HTTPS_PROXY`, and optionally `NO_PROXY` in the environment Herdr uses to start the plugin. All plugin entry points enable Node's `--use-env-proxy`, so both naming and Jev requests use these settings. With no proxy configured, requests connect directly. Use `NO_PROXY` to bypass the proxy for selected hosts.
-
-For an API gateway or reverse proxy, add `baseUrl` to the top-level configuration or the `classifier` object. The code appends `/chat/completions` or `/systemone`, respectively. Keys are still read from the corresponding provider's environment variable.
-
-Remote URLs require HTTPS. HTTP is supported only for `localhost`, `127.0.0.1`, and `::1`.
-
-## Everyday use
-
-Run these commands in the target Pi pane and verify which agent they affect:
+Run actions in the target Pi pane and verify which agent they affect:
 
 | Action | Command |
 | --- | --- |
-| Rename | `herdr plugin action invoke local.auto-name.rename` |
+| Rename from the current task | `herdr plugin action invoke local.auto-name.rename` |
 | Pause automatic naming | `herdr plugin action invoke local.auto-name.pause` |
 | Resume automatic naming | `herdr plugin action invoke local.auto-name.resume` |
 
-While paused, you can still request a single manual rename; automatic naming remains paused afterward. Resuming accepts the current name as the new baseline and checks the task again. Newer control requests supersede older ones.
+A manual rename works while paused and leaves automatic naming paused. Resume accepts the current name as the baseline and checks the task again. Newer control requests supersede older ones.
 
-Add a keyboard shortcut to your Herdr configuration:
+### Keyboard shortcut
+
+Add this to your Herdr configuration:
 
 ```toml
 [[keys.command]]
@@ -174,7 +176,7 @@ command = "local.auto-name.rename"
 description = "rename current agent"
 ```
 
-Disable or unlink the plugin:
+### Disable or remove
 
 ```bash
 herdr plugin disable local.auto-name
@@ -183,7 +185,7 @@ herdr plugin unlink local.auto-name
 
 ## Troubleshooting
 
-Start by checking the plugin status and logs:
+For diagnostics, inspect the CLI's JSON status and logs:
 
 ```bash
 herdr plugin list --plugin local.auto-name --json
@@ -192,52 +194,65 @@ herdr plugin log list --plugin local.auto-name --limit 20
 
 | Symptom or error code | What to check |
 | --- | --- |
-| Name stays the same after enabling | Enabling does not trigger an immediate check. Run a manual rename and inspect the logs |
-| `model_credentials_missing` | Check whether the Herdr plugin process can read the required API key variables |
+| Name stays the same after enabling | Enabling does not trigger a check. Request a manual rename and inspect the logs |
+| `model_credentials_missing` | Confirm that the plugin process can read the required API key variables |
 | `config_missing_or_invalid` | Check for a valid `config.json` in the configuration directory |
 | `model_http_401` / `model_http_403` | Check key validity and service access permissions |
 | `model_unavailable` | Check the service URL, network, and request timeouts |
-| `external_name_paused` / `paused` | Decide whether to keep the manual name; run resume to continue automatic naming |
+| `external_name_paused` / `paused` | Keep the manual name, or run resume to continue automatic naming |
 | `target_shared_session` | Multiple panes use the same session; resolve the conflict and retry |
-| `session_no_text` | Pending input has no usable text; add a text description of the task |
-| `session_size_limit` / `model_input_limit` | The session file or model input exceeds the current limit |
-| `unchanged` | The current message version has already been processed and needs no additional rename |
+| `session_no_text` | Pending input has no usable text; add a task description |
+| `session_size_limit` / `model_input_limit` | The session file or model input exceeds the limits below |
+| `unchanged` | This message version has already been processed; no action is needed |
 
-## How it works and limitations
+When reporting an issue, include Node.js, Herdr, and Pi versions, reproduction steps, and redacted error codes.
 
-The plugin reads user messages on the last persisted branch and processes them as follows:
+## Limitations
 
-```text
-Event or manual action → Enqueue request → Read session → Identify task
-  → Generate name if needed → Recheck target and messages → Rename and confirm → Save progress
-```
+### Platforms and sessions
 
-### Triggers and session scope
+- The manifest enables macOS and Linux. The plugin uses Node.js and `HERDR_BIN_PATH` to call Herdr, avoiding OS-specific socket transport. Automated tests use mock services; verify live integration on the target system.
+- Session paths must be local absolute paths beginning with `/`. Windows drive-letter and backslash UNC paths, remote sessions, and sessions reported only by ID are unsupported.
+- Checks run on `pane.agent_detected` and `pane.agent_status_changed`. Messages added without a status change wait for the next event or manual action.
+- The parser follows `parentId` on the last persisted branch. An in-memory branch switch becomes visible after a subsequent session write.
+- Only complete JSONL lines and user-message text are read. Assistant, tool, and `custom_message` entries are excluded. Extension messages written through `sendUserMessage()` share the ordinary user-message format and cannot be reliably distinguished.
+- Image-only input keeps the name. Mixed input uses only its text.
 
-- Listens for `pane.agent_detected` and `pane.agent_status_changed`. Messages added during work without a status change wait for the next event or manual action.
-- Supports local absolute paths beginning with `/` and v3 JSONL session files. Windows drive-letter and backslash UNC paths, remote sessions, and sessions reported only by ID are currently unsupported.
-- Follows `parentId` to read the last persisted branch. If Pi switches branches only in memory, the plugin observes the change after a subsequent write.
-- Excludes assistant, tool, and `custom_message` entries. Messages written by extensions through `sendUserMessage()` have the same format as ordinary user messages, so their source cannot be reliably distinguished.
-- Reads only complete JSONL lines. Image-only input keeps the current name; mixed input uses only the text.
-- Reads the whole file on each check, up to 32 MiB. Initial processing, branch changes, and manual renames use the latest 8 user messages. Regular incremental processing uses all new messages plus up to 4 recent messages. Model input is limited to 24,000 characters.
+### Input and request limits
 
-### Failure recovery
+| Item | Limit or behavior |
+| --- | --- |
+| Session file | Read in full on each check, up to 32 MiB |
+| Initial check, branch change, or manual rename | Latest 8 user messages |
+| Regular incremental check | All new messages plus up to 4 recent messages |
+| Model input | 24,000 characters |
+| Processing attempts | Up to 3 per operation |
+| Model request timeout | 15 seconds per call |
+| Herdr CLI timeout | 10 seconds per call |
 
-- Requests within the same Herdr service are processed serially. State and pending requests are stored in `HERDR_PLUGIN_STATE_DIR`.
-- Saves a candidate name before renaming. Failed renames reuse the candidate; after a process interruption, the plugin checks the actual name to recover progress.
-- Each processing operation allows up to three attempts. Each model request has a 15-second timeout, and Herdr CLI calls have a 10-second timeout. With Jev enabled, new tasks usually require two sequential model calls.
-- If all processing processes exit, remaining requests need a later event or manual action to resume. The plugin has no persistent polling service.
-- If a process stops after a model response but before saving the result, recovery may call the model again.
-- Herdr 0.9.3 has no atomic rename API conditional on the session. The plugin checks the target before and after renaming, but a race window remains between the check and the rename.
-- External manual renames pause automatic naming. Name queries alone cannot detect a manual rename that returns to the original value or matches the pending candidate name.
+With Jev enabled, a new task usually requires two sequential model calls.
 
-### Privacy
+### Recovery and manual-name protection
 
-Model input includes the current task summary, name, necessary recent text, and new text. The plugin redacts configured keys, some common tokens, private keys, and credential assignment patterns. Redaction catches only some secrets; confirm the service's data handling scope before sending input.
+Requests within one Herdr service are processed serially. The plugin saves a candidate before renaming, reuses it after a failed rename, and checks the actual name to recover after an interruption.
 
-Logs contain status, request sequence numbers, and a restricted set of error codes. They omit full task text, service error responses, and keys. Persisted state contains summaries, message IDs, names, and pending results, but omits full message text. Summaries may still contain sensitive information, so protect the state directory.
+- There is no persistent polling service. If all processing processes exit, pending requests need a later event or manual action to resume.
+- A process that stops after receiving a model response but before saving it may repeat the model call during recovery.
+- Herdr 0.9.3 has no atomic rename conditional on the session. Target checks before and after renaming reduce risk, but a race window remains between the check and rename.
+- External manual renames pause automatic naming. Name queries cannot detect a manual rename that returns to the original value or matches a pending candidate.
 
-## Development and contributing
+## Privacy and stored data
+
+Model input includes the current task summary, name, necessary recent text, and new text. The plugin redacts configured keys, some common tokens, private keys, and credential assignment patterns. **Redaction is partial:** review the service's data handling scope before sending session text.
+
+| Location | Contents |
+| --- | --- |
+| Logs | Status, request sequence numbers, and restricted error codes; no full task text, service error responses, or keys |
+| `HERDR_PLUGIN_STATE_DIR` | State, pending requests, summaries, message IDs, names, and pending results; no full message text |
+
+Summaries may contain sensitive information. Protect the state directory.
+
+## Development
 
 ```bash
 npm ci
@@ -245,7 +260,14 @@ npm run check
 npm test
 ```
 
-Tests cover task processing, provider configuration, Jev routing, concurrency control, failure recovery, and cross-process integration using mock CLI and HTTP services. Automated tests require no real API keys. Classification quality, cost, latency, and Herdr event timing must be verified in a live environment.
+Tests cover task processing, provider configuration, Jev routing, concurrency control, failure recovery, and cross-process integration with mock CLI and HTTP services. They require no real API keys. Classification quality, cost, latency, and Herdr event timing need live verification.
+
+### Processing flow
+
+```text
+Event or action → Enqueue → Read session → Identify task → Generate name if needed
+  → Recheck target and messages → Rename and confirm → Save progress
+```
 
 | Path | Responsibility |
 | --- | --- |
@@ -258,14 +280,14 @@ Tests cover task processing, provider configuration, Jev routing, concurrency co
 | `src/state.mjs` | State files, queue, and locks |
 | `test/` | Unit and integration tests |
 
-When reporting an issue, include your Node.js, Herdr, and Pi versions, reproduction steps, and redacted error codes. Before submitting changes, run the checks above and add tests for behavior changes.
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
+Before submitting changes, run the checks above and add tests for behavior changes.
 
 ## References
 
 - [Herdr plugin documentation (0.9.3)](https://raw.githubusercontent.com/herdrdev/herdr/v0.9.3/docs/next/website/src/content/docs/plugins.mdx)
 - [DeepSeek API documentation](https://api-docs.deepseek.com/)
 - [TypeSafe Choice documentation](https://docs.typesafe.ai/primitives/choice)
+
+## License
+
+[MIT](LICENSE)
