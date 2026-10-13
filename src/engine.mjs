@@ -72,11 +72,24 @@ export async function processRequest(request, { herdr, store, readSession, class
     if (!force && !state.pending && state.version === snapshot.version) return 'unchanged';
 
     const ids = snapshot.messages.map((m) => m.id);
-    // A branch change resets the previous summary so unrelated branches cannot leak in.
-    const continuation = state.processed.every((id, i) => ids[i] === id);
-    const added = force || !continuation || !state.processed.length
-      ? snapshot.messages.slice(-8)
-      : snapshot.messages.slice(state.processed.length);
+    // Newly included assistant IDs may interleave legacy user-only progress.
+    // Every processed ID must still occur in order on the current parent-linked branch.
+    let matched = 0;
+    let processedEnd = 0;
+    for (let i = 0; i < ids.length; i++) {
+      if (ids[i] === state.processed[matched]) {
+        matched++;
+        processedEnd = i + 1;
+      }
+    }
+    const continuation = matched === state.processed.length;
+    const windowStart = Math.max(0, ids.length - 3);
+    const windowIndexes = ids.slice(windowStart).map((_, i) => windowStart + i);
+    const latestUserIndex = snapshot.messages.findLastIndex((message) => message.role === 'user');
+    // Keep the latest user goal even when assistant replies fill the tail.
+    if (latestUserIndex >= 0 && latestUserIndex < windowStart) windowIndexes[0] = latestUserIndex;
+    const addedStart = force || !continuation ? 0 : processedEnd;
+    const added = windowIndexes.filter((i) => i >= addedStart).map((i) => snapshot.messages[i]);
     if (!state.pending) {
       if (!added.some((message) => message.text.trim())) {
         state = { ...state, version: snapshot.version, processed: ids, error: 'session_no_text',
@@ -88,7 +101,7 @@ export async function processRequest(request, { herdr, store, readSession, class
       const decision = validateDecision(await classify({
         summary: continuation ? state.summary : '',
         currentName: agent.name ?? '', force,
-        recentMessages: continuation && !force ? snapshot.messages.slice(Math.max(0, state.processed.length - 4), state.processed.length) : [],
+        recentMessages: windowIndexes.filter((i) => i < addedStart).map((i) => snapshot.messages[i]),
         newMessages: added, branchChanged: !continuation,
       }));
       const next = {

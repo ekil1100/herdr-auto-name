@@ -215,16 +215,19 @@ When reporting an issue, include Node.js, Herdr, and Pi versions, reproduction s
 - Session paths must be local absolute paths beginning with `/`. Windows drive-letter and backslash UNC paths, remote sessions, and sessions reported only by ID are unsupported.
 - Checks run on `pane.agent_detected` and `pane.agent_status_changed`. Messages added without a status change wait for the next event or manual action.
 - The parser follows `parentId` on the last persisted branch. An in-memory branch switch becomes visible after a subsequent session write.
-- Only complete JSONL lines and user-message text are read. Assistant, tool, and `custom_message` entries are excluded. Extension messages written through `sendUserMessage()` share the ordinary user-message format and cannot be reliably distinguished.
+- Only complete JSONL lines are read. User text and assistant replies include explicit role labels. Assistant replies provide context; assistant suggestions alone do not establish a new user goal. Thinking blocks, tool calls, tool results, and `custom_message` entries are excluded. Extension messages written through `sendUserMessage()` share the ordinary user-message format and cannot be reliably distinguished.
 - Image-only input keeps the name. Mixed input uses only its text.
 
 ### Input and request limits
 
+Every model call includes the existing task summary and name, plus at most 3 user and assistant text messages combined. It selects the latest 3 messages; if they omit the latest user message, it selects that user message and the latest 2 other messages instead, in chronological order.
+
+Incremental processing splits this window into recent and new messages at the last processed message. Saved user-only progress remains valid when assistant messages are interleaved; missing or reordered processed IDs indicate a branch change and clear the previous summary. Assistant text updates are checked at the next event or manual action.
+
 | Item | Limit or behavior |
 | --- | --- |
 | Session file | Read in full on each check, up to 32 MiB |
-| Initial check, branch change, or manual rename | Latest 8 user messages |
-| Regular incremental check | All new messages plus up to 4 recent messages |
+| Every check or manual rename | At most 3 user and assistant messages combined, retaining the latest user message |
 | Model input | 24,000 characters |
 | Processing attempts | Up to 3 per operation |
 | Model request timeout | 15 seconds per call |
@@ -267,6 +270,12 @@ Tests cover task processing, provider configuration, Jev routing, concurrency co
 ```text
 Event or action → Enqueue → Read session → Identify task → Generate name if needed
   → Recheck target and messages → Rename and confirm → Save progress
+```
+
+Opt in to live naming regression tests with a configuration directory and the required API keys in your environment. These tests send fixed fixture messages to the configured services and incur API usage:
+
+```bash
+AUTO_NAME_LIVE_CONFIG_DIR=/path/to/config-dir node --use-env-proxy --test test/naming-live.test.mjs
 ```
 
 | Path | Responsibility |

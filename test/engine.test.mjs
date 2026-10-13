@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { processRequest } from '../src/engine.mjs';
+import { hash, parseSession } from '../src/pi-session.mjs';
 
 function fixture() {
   const f = {
@@ -220,3 +221,224 @@ test('failed old manual request cannot cross a newer completed pause', async () 
   assert.equal(f.saved.paused, true);
   assert.equal(f.renames, 0);
 });
+
+
+for (const action of ['check', 'rename', 'resume']) {
+  test(`latest three combined messages bound ${action} context`, async () => {
+    const f = fixture();
+    f.snapshot.messages = Array.from({ length: 6 }, (_, i) => ({
+      id: `m${i}`, role: i % 2 ? 'assistant' : 'user', text: `Message ${i}`,
+    }));
+    await f.run(action);
+    assert.deepEqual([...f.input.recentMessages, ...f.input.newMessages], f.snapshot.messages.slice(-3));
+    assert.deepEqual(f.saved.processed, f.snapshot.messages.map(m => m.id));
+  });
+}
+
+test('incremental assistant replies and branch changes use a combined three-message window', async () => {
+  const f = fixture();
+  await f.run();
+  for (let i = 0; i < 5; i++) f.add(`Follow-up ${i}`);
+  await f.run();
+  assert.deepEqual([...f.input.recentMessages, ...f.input.newMessages], f.snapshot.messages.slice(-3));
+  f.snapshot.messages.push({ id: 'reply', role: 'assistant', text: 'Suggested next step' });
+  f.snapshot.version = 'reply';
+  await f.run();
+  assert.equal(f.input.newMessages[0].role, 'assistant');
+  assert.equal(f.input.recentMessages.length, 2);
+  f.snapshot.messages = f.snapshot.messages.slice(-4);
+  f.snapshot.version = 'branch';
+  await f.run();
+  assert.equal(f.input.summary, '');
+  assert.deepEqual(f.input.recentMessages, []);
+  assert.deepEqual(f.input.newMessages, f.snapshot.messages.slice(-3));
+});
+
+// Exercise the engine with real branch traversal and content-derived revisions.
+function parsedFixture() {
+  const f = fixture();
+  f.entries = [];
+  f.append = (id, role, text, parentId = f.entries.at(-1)?.id ?? null) => {
+    f.entries.push({ type: 'message', id, parentId, message: { role, content: text } });
+  };
+  f.parse = () => ({
+    ...parseSession([{ type: 'session', version: 3, id: 's1' }, ...f.entries].map(JSON.stringify).join('\n') + '\n'),
+    fileIdentity: '1:1',
+  });
+  f.deps.readSession = async () => f.parse();
+  f.legacyProgress = () => {
+    const users = f.parse().messages.filter(m => m.role === 'user').map(({ id, text }) => ({ id, text }));
+    f.agents[0].name = 'fix-login';
+    f.saved = {
+      schema: 1, paused: false, summary: 'Fix login', processed: users.map(m => m.id),
+      version: hash(JSON.stringify(['s1', users])), observedName: 'fix-login', terminalId: 't1', pending: null,
+    };
+  };
+  return f;
+}
+
+for (const action of ['check', 'rename', 'resume']) {
+  test(`parsed session retains latest user goal after three assistant replies on ${action}`, async () => {
+    const f = parsedFixture();
+    f.append('u1', 'user', 'Fix login');
+    f.append('a1', 'assistant', 'Investigating login');
+    f.append('a2', 'assistant', 'Found the login bug');
+    f.append('a3', 'assistant', 'We could also improve payments');
+    assert.equal(await f.run(action), 'renamed');
+    assert.deepEqual(f.input.recentMessages, []);
+    assert.deepEqual(f.input.newMessages, f.parse().messages.filter(m => m.id !== 'a1'));
+    assert.deepEqual(f.saved.processed, ['u1', 'a1', 'a2', 'a3']);
+    assert.equal(await f.run(action), 'unchanged');
+    assert.equal(f.calls, 1);
+  });
+}
+
+test('parsed incremental window retains an unprocessed user goal and later keeps it as recent context', async () => {
+  const f = parsedFixture();
+  f.append('u1', 'user', 'Fix login');
+  await f.run();
+  f.append('u2', 'user', 'Next, fix payment timeouts');
+  for (let i = 1; i <= 3; i++) f.append(`a${i}`, 'assistant', `Payment investigation ${i}`);
+  f.decision = { decision: 'new_task', summary: 'Fix payment timeouts', name: 'fix-payment' };
+  assert.equal(await f.run(), 'renamed');
+  assert.deepEqual(f.input.recentMessages, []);
+  assert.deepEqual(f.input.newMessages.map(m => m.id), ['u2', 'a2', 'a3']);
+  assert.equal(f.input.summary, 'Fix login');
+  assert.equal(f.input.branchChanged, false);
+  assert.deepEqual(f.saved.processed, ['u1', 'u2', 'a1', 'a2', 'a3']);
+
+  f.append('a4', 'assistant', 'Payment tests pass');
+  f.decision = { decision: 'same_task', summary: 'Fix payment timeouts', name: '' };
+  assert.equal(await f.run(), 'same_task');
+  assert.deepEqual(f.input.recentMessages.map(m => m.id), ['u2', 'a3']);
+  assert.deepEqual(f.input.newMessages.map(m => m.id), ['a4']);
+});
+
+for (const appendReply of [false, true]) {
+  test(`legacy user-only progress preserves summary and uses last matched boundary, reply=${appendReply}`, async () => {
+    const f = parsedFixture();
+    f.append('u1', 'user', 'Fix login');
+    f.append('a1', 'assistant', 'Checking the handler');
+    f.append('u2', 'user', 'Add tests');
+    f.legacyProgress();
+    if (appendReply) f.append('a2', 'assistant', 'Login tests pass');
+    f.decision = { decision: 'same_task', summary: 'Fix login', name: '' };
+    assert.equal(await f.run(), appendReply ? 'same_task' : 'no_text');
+    assert.equal(f.saved.summary, 'Fix login');
+    assert.deepEqual(f.saved.processed, f.parse().messages.map(m => m.id));
+    assert.equal(f.renames, 0);
+    if (appendReply) {
+      assert.equal(f.input.branchChanged, false);
+      assert.equal(f.input.summary, 'Fix login');
+      assert.deepEqual(f.input.recentMessages.map(m => m.id), ['a1', 'u2']);
+      assert.deepEqual(f.input.newMessages.map(m => m.id), ['a2']);
+    }
+    assert.equal(await f.run(), 'unchanged');
+    assert.equal(f.calls, appendReply ? 1 : 0);
+  });
+}
+
+for (const legacy of [false, true]) {
+  test(`parsed sibling branch clears summary with legacy progress=${legacy}`, async () => {
+    const f = parsedFixture();
+    f.append('root', 'user', 'Work on the app');
+    f.append('u1', 'user', 'Fix login');
+    f.append('a1', 'assistant', 'Checking login');
+    f.append('u2', 'user', 'Add tests');
+    if (legacy) f.legacyProgress();
+    else await f.run();
+    f.append('fork', 'assistant', 'Let us inspect the database', 'root');
+    f.append('goal', 'user', 'Fix database connections');
+    f.decision = { decision: 'uncertain', summary: 'Ignored', name: '' };
+    assert.equal(await f.run(), 'uncertain');
+    assert.equal(f.input.branchChanged, true);
+    assert.equal(f.input.summary, '');
+    assert.deepEqual(f.input.recentMessages, []);
+    assert.deepEqual(f.input.newMessages.map(m => m.id), ['root', 'fork', 'goal']);
+    assert.equal(f.saved.summary, '');
+    assert.deepEqual(f.saved.processed, ['root', 'fork', 'goal']);
+  });
+}
+
+for (const changedIds of [['u1', 'u2'], ['u1', 'a1'], ['u2', 'a1', 'u1']]) {
+  test(`parsed replacement resets progress for missing or reordered IDs: ${changedIds}`, async () => {
+    const f = parsedFixture();
+    const messages = { u1: ['user', 'Fix login'], a1: ['assistant', 'Checking login'], u2: ['user', 'Add tests'] };
+    for (const id of ['u1', 'a1', 'u2']) f.append(id, ...messages[id]);
+    await f.run();
+    f.entries = [];
+    for (const id of changedIds) f.append(id, ...messages[id]);
+    f.decision = { decision: 'uncertain', summary: '', name: '' };
+    assert.equal(await f.run(), 'uncertain');
+    assert.equal(f.input.branchChanged, true);
+    assert.equal(f.input.summary, '');
+    assert.equal(f.saved.summary, '');
+  });
+}
+
+for (const decision of ['new_task', 'same_task']) {
+  test(`parsed assistant append during ${decision} model call discards result and progress`, async () => {
+    const f = parsedFixture();
+    f.append('u1', 'user', 'Fix login');
+    await f.run();
+    const before = structuredClone(f.saved);
+    f.append('u2', 'user', 'Add tests');
+    f.decision = { decision, summary: 'Fix login with tests', name: decision === 'new_task' ? 'test-login' : '' };
+    const classify = f.deps.classify;
+    f.deps.classify = async input => {
+      f.append('a1', 'assistant', 'Tests exposed another login bug');
+      return classify(input);
+    };
+    assert.equal(await f.run(), 'stale_result');
+    assert.deepEqual(f.saved, before);
+    assert.equal(f.renames, 1);
+    f.deps.classify = classify;
+    assert.equal(await f.run(), decision === 'new_task' ? 'renamed' : 'same_task');
+    assert.deepEqual(f.input.newMessages.map(m => m.id), ['u2', 'a1']);
+    assert.deepEqual(f.saved.processed, ['u1', 'u2', 'a1']);
+    assert.equal(f.saved.version, f.parse().version);
+    assert.equal(f.calls, 3);
+  });
+}
+
+for (const duringRetry of [false, true]) {
+  test(`parsed assistant append invalidates pending rename, during retry=${duringRetry}`, async () => {
+    const f = parsedFixture();
+    f.append('u1', 'user', 'Fix login');
+    await f.run();
+    const before = structuredClone(f.saved);
+    f.append('u2', 'user', 'Add tests');
+    f.decision = { decision: 'new_task', summary: 'Test login', name: 'test-login' };
+    const rename = f.deps.herdr.rename;
+    f.deps.herdr.rename = async () => { throw new Error('target_cli_failed'); };
+    await assert.rejects(f.run(), /cli_failed/);
+    assert.equal(f.saved.pending.name, 'test-login');
+    assert.equal(f.saved.version, before.version);
+    assert.deepEqual(f.saved.processed, before.processed);
+    f.deps.herdr.rename = rename;
+    if (duringRetry) {
+      let reads = 0;
+      f.deps.readSession = async () => {
+        if (++reads === 2) f.append('a1', 'assistant', 'Login tests pass');
+        return f.parse();
+      };
+      assert.equal(await f.run(), 'stale_result');
+      assert.equal(f.calls, 2);
+      assert.equal(f.renames, 1);
+      assert.equal(f.saved.version, before.version);
+      assert.deepEqual(f.saved.processed, before.processed);
+      f.deps.readSession = async () => f.parse();
+    } else f.append('a1', 'assistant', 'Login tests pass');
+    f.decision = { decision: 'same_task', summary: 'Fix login with tests', name: '' };
+    assert.equal(await f.run(), 'same_task');
+    assert.equal(f.input.summary, 'Fix login');
+    assert.deepEqual(f.input.newMessages.map(m => m.id), ['u2', 'a1']);
+    assert.equal(f.saved.pending, null);
+    assert.deepEqual(f.saved.processed, ['u1', 'u2', 'a1']);
+    assert.equal(f.saved.version, f.parse().version);
+    assert.equal(f.saved.summary, 'Fix login with tests');
+    assert.equal(f.agents[0].name, 'fix-login');
+    assert.equal(f.renames, 1);
+    assert.equal(f.calls, 3);
+  });
+}

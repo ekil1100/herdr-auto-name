@@ -33,14 +33,16 @@ export function parseSession(text) {
     entry = index.get(entry.parentId);
   }
   const messages = branch.reverse()
-    .filter((item) => item.type === 'message' && item.message?.role === 'user')
+    .filter((item) => item.type === 'message' && ['user', 'assistant'].includes(item.message?.role))
     .map((item) => ({
       id: item.id,
+      role: item.message.role,
       text: typeof item.message.content === 'string' ? item.message.content :
         (Array.isArray(item.message.content) ? item.message.content : [])
           .filter((block) => block.type === 'text' && typeof block.text === 'string')
           .map((block) => block.text).join('\n'),
-    }));
+    }))
+    .filter((message) => message.role === 'user' || message.text.trim());
   return {
     sessionId: header.id,
     messages,
