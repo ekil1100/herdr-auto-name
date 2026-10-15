@@ -16,6 +16,21 @@ for (const force of [false, true]) {
   });
 }
 
+test('live naming fills a missing name when the known task continues', { skip: !directory }, async () => {
+  const config = await loadConfig(directory);
+  const result = await classify({
+    summary: '检查 DeepSeek 服务故障是否已修复，并验证自动命名是否恢复',
+    currentName: '', force: false, branchChanged: false,
+    recentMessages: [{ id: '1', role: 'assistant', text: 'DeepSeek 服务已恢复，自动命名还需要验证。' }],
+    newMessages: [
+      { id: '2', role: 'user', text: '我试了一下，还是没有rename' },
+      { id: '3', role: 'assistant', text: '排查发现模型返回 same_task，插件跳过命名。将为无名称的 agent 设置 force=true，并验证自动改名。' },
+    ],
+  }, config);
+  assert.equal(result.decision, 'new_task');
+  assert.ok(result.name);
+});
+
 test('live naming keeps vague input unnamed', { skip: !directory }, async () => {
   const config = await loadConfig(directory);
   const result = await classify({

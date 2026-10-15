@@ -89,6 +89,35 @@ test('absent classifier and explicit manual requests use the ordinary model dire
   }
 });
 
+test('unnamed agents generate a name for an existing task and bypass the classifier', async () => {
+  const unnamed = { ...input, currentName: '', force: false };
+  for (const settings of [{ ...config, classifier: null }, config]) {
+    const urls = [];
+    const result = await classify(unnamed, settings, async (url, options) => {
+      urls.push(url);
+      if (url.endsWith('/systemone')) return choice('same_task');
+      const request = JSON.parse(JSON.parse(options.body).messages[1].content);
+      if (request.force) return generated();
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+        decision: 'same_task', summary: input.summary, name: '',
+      }) } }] }));
+    });
+    assert.equal(result.decision, 'new_task');
+    assert.ok(result.name);
+    assert.deepEqual(urls, ['https://api.deepseek.com/chat/completions']);
+  }
+  assert.equal(unnamed.force, false);
+});
+
+test('required naming rejects same_task instead of accepting an empty name', async () => {
+  for (const request of [{ ...input, currentName: '', force: false }, { ...input, force: true }]) {
+    await assert.rejects(classify(request, { ...config, classifier: null }, async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+        decision: 'same_task', summary: input.summary, name: '',
+      }) } }] }))), /model_invalid_output/);
+  }
+});
+
 test('configured Jev errors preserve failure behavior instead of silently changing services', async () => {
   for (const response of [() => new Response('secret body', { status: 503 }),
     () => new Response(JSON.stringify({ answers: { task: { type: 'choice', choice: 'unexpected' } } })),

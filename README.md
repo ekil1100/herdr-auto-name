@@ -149,6 +149,7 @@ This example requires both `DEEPSEEK_API_KEY` and `TYPESAFE_API_KEY`. The suppor
 | `classifier` omitted | One naming-model call identifies the task and generates a name |
 | Jev reports the same task or insufficient context | Keep the name and summary; skip the naming-model call |
 | Jev reports a new task | Call the naming model for a name and summary |
+| Agent has no name | Call the naming model directly, even if the task is unchanged; insufficient context still keeps the agent unnamed |
 | Manual rename or resume | Call the naming model directly to allow classification mistakes to be corrected |
 | Jev call fails | Keep the name and retry using the selected service |
 
