@@ -1,6 +1,6 @@
 # Herdr Auto Name
 
-Automatically name local Pi agents in [Herdr](https://herdr.dev) from their current task. Names are short and English: follow-up work keeps the name, while a new goal gets a new name.
+Automatically name local Pi, Claude Code, Codex, and Kimi agents in [Herdr](https://herdr.dev) from their current task. Names are short and English: follow-up work keeps the name, while a new goal gets a new name.
 
 | User input | Example result |
 | --- | --- |
@@ -11,7 +11,7 @@ Automatically name local Pi agents in [Herdr](https://herdr.dev) from their curr
 
 Actual names depend on the model. You can request a rename, pause automatic naming, or rename an agent yourself. An external manual rename pauses automatic naming for that session.
 
-The plugin supports DeepSeek and OpenAI for task identification and naming, with optional TypeSafe Jev classification to skip naming calls for unchanged tasks. It reads Pi session files without modifying them and requires no changes to Herdr's managed Pi integration.
+The plugin supports DeepSeek and OpenAI for task identification and naming, with optional TypeSafe Jev classification to skip naming calls for unchanged tasks. It reads local session files without modifying them and requires no changes to Herdr's managed agent integrations.
 
 [Installation](#installation) · [Configuration](#configuration) · [Usage](#usage) · [Troubleshooting](#troubleshooting) · [Limitations](#limitations)
 
@@ -24,7 +24,7 @@ The plugin supports DeepSeek and OpenAI for task identification and naming, with
 | Platform | macOS or Linux; live integration must be verified on your system |
 | Node.js | 22.21+ within Node 22, or 24.5+; `node` must be in the plugin process's `PATH` |
 | Herdr | 0.9.3 or later; verified with 0.9.3 |
-| Agent | Local Pi with a session file path reported by Herdr; parsing uses the v3 JSONL format from Pi 1.0.0 |
+| Agent | Local Pi, Claude Code, Codex, or Kimi with a session reference reported by Herdr; see [Supported sessions](#supported-sessions) |
 | Model service | DeepSeek or OpenAI; TypeSafe is optional |
 
 > **Privacy:** Task text and summaries are sent to the configured model service, and also to TypeSafe when Jev is enabled. Confirm that your sessions may use these services before enabling the plugin. See [Privacy and stored data](#privacy-and-stored-data).
@@ -73,10 +73,10 @@ The plugin reads keys from environment variables, not Pi's login store. Keep key
 herdr plugin enable local.auto-name > /dev/null
 ```
 
-Paste this prompt into a local Pi agent running in Herdr. The agent can inspect the CLI's JSON output and summarize the result for you:
+Paste this prompt into a supported local agent running in Herdr. The agent can inspect the CLI's JSON output and summarize the result for you:
 
 ```text
-Verify that the Herdr Auto Name plugin (local.auto-name) works for this Pi agent.
+Verify that the Herdr Auto Name plugin (local.auto-name) works for this agent.
 
 1. Run `herdr plugin list --plugin local.auto-name --json` and confirm that the
    plugin is enabled.
@@ -98,9 +98,20 @@ Herdr, or rename other agents. This check may rename the current agent to
 match this verification task; it verifies manual naming, not automatic events.
 ```
 
-Enabling alone does not check the current task. Automatic checks run on subsequent agent detection and status changes. The plugin processes eligible local Pi agents throughout that Herdr service, not just the current pane. See [Troubleshooting](#troubleshooting) for common errors.
+Enabling alone does not check the current task. Automatic checks run on subsequent agent detection and status changes. The plugin processes eligible local Pi, Claude Code, Codex, and Kimi agents throughout that Herdr service, not just the current pane. See [Troubleshooting](#troubleshooting) for common errors.
 
 ## Configuration
+
+### Supported sessions
+
+| Agent | Herdr session reference | Local storage |
+| --- | --- | --- |
+| Pi (`pi`) | Absolute file path | Pi v3 JSONL session |
+| Claude Code (`claude`) | Session ID or absolute transcript path | `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/*/<id>.jsonl` |
+| Codex (`codex`) | Session ID or absolute rollout path | `${CODEX_HOME:-~/.codex}/sessions/YYYY/MM/DD/rollout-*-<id>.jsonl[.zst]` |
+| Kimi (`kimi`) | Session ID or absolute context path | `${KIMI_SHARE_DIR:-~/.kimi}/sessions/*/<id>/context.jsonl` |
+
+Set custom storage environment variables in the environment that starts the plugin. Session IDs are resolved locally on each check. Missing files wait for a later retry; multiple matching files return `session_ambiguous` and keep the current name. Codex filenames with a separate rollout ID are recognized, but multiple rollouts for one thread require an explicit transcript path from the integration. Archived Codex sessions are not searched.
 
 Settings live in `config.json` in the directory returned by `herdr plugin config-dir local.auto-name`.
 
@@ -155,7 +166,7 @@ This example requires both `DEEPSEEK_API_KEY` and `TYPESAFE_API_KEY`. The suppor
 
 ## Usage
 
-Run actions in the target Pi pane and verify which agent they affect:
+Run actions in the target agent pane and verify which agent they affect:
 
 | Action | Command |
 | --- | --- |
@@ -202,20 +213,25 @@ herdr plugin log list --plugin local.auto-name --limit 20
 | `model_unavailable` | Check the service URL, network, and request timeouts |
 | `external_name_paused` / `paused` | Keep the manual name, or run resume to continue automatic naming |
 | `target_shared_session` | Multiple panes use the same session; resolve the conflict and retry |
+| `session_not_ready` | The local transcript has not been created yet, or the plugin has a different session storage directory |
+| `session_ambiguous` | Multiple local transcripts match the same ID; provide an unambiguous session reference |
+| `session_identity_mismatch` | The transcript belongs to a different session |
 | `session_no_text` | Pending input has no usable text; add a task description |
 | `session_size_limit` / `model_input_limit` | The session file or model input exceeds the limits below |
 | `unchanged` | This message version has already been processed; no action is needed |
 
-When reporting an issue, include Node.js, Herdr, and Pi versions, reproduction steps, and redacted error codes.
+When reporting an issue, include Node.js, Herdr, and agent versions, reproduction steps, and redacted error codes.
 
 ## Limitations
 
 ### Platforms and sessions
 
 - The manifest enables macOS and Linux. The plugin uses Node.js and `HERDR_BIN_PATH` to call Herdr, avoiding OS-specific socket transport. Automated tests use mock services; verify live integration on the target system.
-- Session paths must be local absolute paths beginning with `/`. Windows drive-letter and backslash UNC paths, remote sessions, and sessions reported only by ID are unsupported.
+- Session files must be local absolute paths beginning with `/`, or resolvable local IDs for Claude Code, Codex, and Kimi. Windows drive-letter and backslash UNC paths and remote sessions are unsupported.
 - Checks run on `pane.agent_detected` and `pane.agent_status_changed`. Messages added without a status change wait for the next event or manual action.
-- The parser follows `parentId` on the last persisted branch. An in-memory branch switch becomes visible after a subsequent session write.
+- Pi follows `parentId` on the last persisted branch. Claude follows `parentUuid` from the last persisted main-chain entry, using `logicalParentUuid` across compaction boundaries; sidechains, meta messages, compaction summaries, and tool-result wrappers are excluded. In-memory branch switches become visible after a subsequent session write.
+- Codex reads `response_item` conversation messages, excluding reasoning, tools, and duplicated event messages. It retains original conversation across compaction and applies persisted `thread_rolled_back` events. Startup instruction wrappers are excluded.
+- Kimi reads user and assistant text from the current `context.jsonl`, excluding system, checkpoint, usage, thinking, and tool records. Context rewrites are reread; compacted context can include summaries represented as ordinary messages.
 - Only complete JSONL lines are read. User text and assistant replies include explicit role labels. Assistant replies provide context; assistant suggestions alone do not establish a new user goal. Thinking blocks, tool calls, tool results, and `custom_message` entries are excluded. Extension messages written through `sendUserMessage()` share the ordinary user-message format and cannot be reliably distinguished.
 - Image-only input keeps the name. Mixed input uses only its text.
 
@@ -227,7 +243,7 @@ Incremental processing splits this window into recent and new messages at the la
 
 | Item | Limit or behavior |
 | --- | --- |
-| Session file | Read in full on each check, up to 32 MiB |
+| Session file | Read in full on each check, up to 32 MiB (also enforced after Codex Zstandard decompression) |
 | Every check or manual rename | At most 3 user and assistant messages combined, retaining the latest user message |
 | Model input | 24,000 characters |
 | Processing attempts | Up to 3 per operation |
@@ -285,7 +301,8 @@ AUTO_NAME_LIVE_CONFIG_DIR=/path/to/config-dir node --use-env-proxy --test test/n
 | `src/main.mjs` | Enqueueing, serial processing, and bounded retries |
 | `src/herdr.mjs` | Herdr CLI and invocation context |
 | `src/engine.mjs` | Task state, manual name protection, and recovery |
-| `src/pi-session.mjs` | Read-only session parsing |
+| `src/session.mjs` | Agent adapters, local session ID resolution, and unified conversation snapshots |
+| `src/pi-session.mjs` | Pi branch parsing and bounded read-only file snapshots |
 | `src/naming.mjs` | Provider configuration, model calls, redaction, and name validation |
 | `src/state.mjs` | State files, queue, and locks |
 | `test/` | Unit and integration tests |

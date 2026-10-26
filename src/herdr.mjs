@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { supportedAgents } from './session.mjs';
 
 const exec = promisify(execFile);
 
@@ -25,8 +26,10 @@ export class Herdr {
 
 export function sessionPath(agent) {
   const session = agent?.agent_session;
-  if (agent?.agent !== 'pi' || session?.agent !== 'pi' || session.kind !== 'path' ||
-      typeof session.value !== 'string' || !session.value.startsWith('/')) {
+  if (!supportedAgents.includes(agent?.agent) || session?.agent !== agent.agent ||
+      typeof session.value !== 'string' ||
+      !((session.kind === 'path' && session.value.startsWith('/')) ||
+        (agent.agent !== 'pi' && session.kind === 'id' && /^[a-zA-Z0-9_-]+$/.test(session.value)))) {
     throw new Error('target_unsupported_session');
   }
   return session.value;

@@ -1,5 +1,6 @@
 import { open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { zstdDecompressSync } from 'node:zlib';
 import { isAbsolute } from 'node:path';
 
 export function hash(value) {
@@ -53,7 +54,7 @@ export function parseSession(text) {
   };
 }
 
-export async function readSession(path) {
+export async function readSession(path, parse = parseSession) {
   if (!isAbsolute(path)) throw new Error('session_nonlocal_path');
   const file = await open(path, 'r');
   try {
@@ -68,6 +69,8 @@ export async function readSession(path) {
     }
     const after = await file.stat();
     if (after.size < before.size) throw new Error('session_changed_during_read');
-    return { ...parseSession(buffer.toString('utf8')), fileIdentity: `${before.dev}:${before.ino}` };
+    const contents = path.endsWith('.zst')
+      ? zstdDecompressSync(buffer, { maxOutputLength: 32 * 1024 * 1024 }) : buffer;
+    return { ...parse(contents.toString('utf8')), fileIdentity: `${before.dev}:${before.ino}` };
   } finally { await file.close(); }
 }

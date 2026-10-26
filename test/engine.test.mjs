@@ -101,6 +101,34 @@ test('session switches reject old results and shared session panes are refused',
   await assert.rejects(g.run(), /shared_session/);
 });
 
+test('agent kind changes reject stale results and session keys stay isolated', async () => {
+  const f = fixture();
+  f.deps.classify = async () => {
+    f.agents[0].agent = 'claude';
+    f.agents[0].agent_session.agent = 'claude';
+    return f.decision;
+  };
+  await assert.rejects(f.run(), /target_changed/);
+  assert.equal(f.renames, 0);
+  const g = fixture();
+  g.request.agent = 'kimi';
+  g.agents[0].agent = 'kimi';
+  g.agents[0].agent_session.agent = 'kimi';
+  g.agents.push({ agent: 'claude', terminal_id: 't2', pane_id: 'w1:p2',
+    agent_session: { agent: 'claude', kind: 'path', value: '/session' } });
+  const save = g.deps.store.save;
+  g.deps.store.save = async (key, value) => {
+    assert.deepEqual(JSON.parse(key), ['kimi', '/session', 's1']);
+    await save(key, value);
+  };
+  g.deps.readSession = async (value, agent) => {
+    assert.equal(value, '/session');
+    assert.equal(agent, 'kimi');
+    return structuredClone(g.snapshot);
+  };
+  assert.equal(await g.run(), 'renamed');
+});
+
 test('pane moves follow terminal identity', async () => {
   const f = fixture();
   f.deps.classify = async () => { f.agents[0].pane_id = 'w2:p4'; return f.decision; };

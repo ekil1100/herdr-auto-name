@@ -4,8 +4,8 @@ import { safeError } from './state.mjs';
 
 function locate(agents, request) {
   const agent = agents.find((item) => item.terminal_id === request.terminalId);
-  if (!agent || sessionPath(agent) !== request.path) throw new Error('target_changed');
-  if (agents.filter((item) => item.agent === 'pi' && item.agent_session?.value === request.path).length !== 1) {
+  if (!agent || agent.agent !== (request.agent ?? 'pi') || sessionPath(agent) !== request.path) throw new Error('target_changed');
+  if (agents.filter((item) => item.agent === agent.agent && item.agent_session?.value === request.path).length !== 1) {
     throw new Error('target_shared_session');
   }
   return agent;
@@ -18,8 +18,8 @@ export async function processRequest(request, { herdr, store, readSession, class
   const controlToken = `${request.id}:${request.action}`;
   let agents = await herdr.list();
   let agent = locate(agents, request);
-  const snapshot = await readSession(request.path);
-  const key = JSON.stringify(['pi', request.path, snapshot.sessionId]);
+  const snapshot = await readSession(request.path, agent.agent);
+  const key = JSON.stringify([agent.agent, request.path, snapshot.sessionId]);
   let state = await store.load(key) ?? {
     schema: 1, paused: false, summary: '', processed: [], version: null,
     observedName: agent.name ?? null, terminalId: agent.terminal_id, pending: null,
@@ -113,7 +113,7 @@ export async function processRequest(request, { herdr, store, readSession, class
       // Check messages, occupant, manual name, and queued controls after model latency.
       const freshAgents = await herdr.list();
       const fresh = locate(freshAgents, request);
-      const freshSnapshot = await readSession(request.path);
+      const freshSnapshot = await readSession(request.path, agent.agent);
       if (await store.hasControl(request.terminalId, request.id)) return 'superseded';
       if (revision(freshSnapshot) !== revision(snapshot)) return 'stale_result';
       if ((fresh.name ?? null) !== state.observedName) {
@@ -140,7 +140,7 @@ export async function processRequest(request, { herdr, store, readSession, class
     agents = await herdr.list();
     agent = locate(agents, request);
     if (await store.hasControl(request.terminalId, request.id)) return 'superseded';
-    if (revision(await readSession(request.path)) !== state.pending.revision) return 'stale_result';
+    if (revision(await readSession(request.path, agent.agent)) !== state.pending.revision) return 'stale_result';
     if ((agent.name ?? null) !== state.observedName) {
       state.paused = true;
       state.pending = null;

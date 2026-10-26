@@ -2,7 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Herdr, invocation, sessionPath } from './herdr.mjs';
 import { Store, safeError } from './state.mjs';
-import { readSession } from './pi-session.mjs';
+import { readSession, supportedAgents } from './session.mjs';
 import { classify, loadConfig } from './naming.mjs';
 import { processRequest } from './engine.mjs';
 
@@ -12,7 +12,8 @@ export async function main(env = process.env, action = process.argv[2] || 'check
   const herdr = new Herdr(env);
   const target = (await herdr.list()).find((a) => a.pane_id === request.paneId);
   // Ignore events for unrelated agent kinds and departed occupants.
-  if (!target || target.agent !== 'pi') return;
+  if (!target || !supportedAgents.includes(target.agent)) return;
+  request.agent = target.agent;
   request.path = sessionPath(target);
   request.terminalId = target.terminal_id;
   if (typeof request.terminalId !== 'string') throw new Error('target_identity_missing');
@@ -29,14 +30,15 @@ export async function main(env = process.env, action = process.argv[2] || 'check
       if (!next) break;
       visited.add(next.id);
       if (next.action === 'check' && requests.some((r) => r.id > next.id &&
-          r.action === 'check' && r.terminalId === next.terminalId && r.path === next.path)) {
+          r.action === 'check' && r.terminalId === next.terminalId && r.path === next.path &&
+          (r.agent ?? 'pi') === (next.agent ?? 'pi'))) {
         await store.remove(next.id);
         continue;
       }
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const result = await processRequest(next, {
-            herdr, store, readSession, assertLock: lock.assert,
+            herdr, store, readSession: (value, agent) => readSession(value, agent, env), assertLock: lock.assert,
             classify: async (input) => classify(input, await loadConfig(env.HERDR_PLUGIN_CONFIG_DIR, env)),
           });
           console.log(JSON.stringify({ status: result, request: next.id }));
